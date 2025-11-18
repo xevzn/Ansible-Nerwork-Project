@@ -1,0 +1,11 @@
+[switches]
+SW1
+SW2
+SWCORE
+SWBR
+
+[all:vars]
+ansible_connection=network_cli
+ansible_network_os=cisco.ios.ios
+ansible_become=yes
+ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o KexAlgorithms=+diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa'

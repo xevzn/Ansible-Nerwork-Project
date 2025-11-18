@@ -1,0 +1,18 @@
+[switches]
+SW1 ansible_host=192.168.1.11
+SW2 ansible_host=192.168.1.12
+SW_CORE ansible_host=192.168.1.1
+SWBR ansible_host=172.16.1.2
+
+[routers]
+
+[all:vars]
+# No hay usuario/contraseña por defecto aquí.
+# Conservar los ajustes de conexión (no son credenciales)
+ansible_connection=network_cli
+ansible_network_os=cisco.ios.ios
+
+# Si tus dispositivos antiguos requieren KEX/HostKey extras,
+# puedes mantener la siguiente línea. Úsala solo si es imprescindible.
+# ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o KexAlgorithms=+diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa'
+

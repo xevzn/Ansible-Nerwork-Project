@@ -1,0 +1,121 @@
+---
+- name: 01. Recolección de Información (Switches y Routers)
+  hosts: switches
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    csv_file: "./output/inventario_red.csv"
+    # --- NUEVA VARIABLE ---
+    csv_svi_file: "./output/inventario_svi.csv"
+
+  tasks:
+    - name: Crear carpeta de salida si no existe
+      ansible.builtin.file:
+        path: ./output
+        state: directory
+      delegate_to: localhost
+      run_once: true
+
+    - name: Ejecutar comando SHOW VERSION
+      cisco.ios.ios_command:
+        commands:
+          - show version
+      register: show_version_output
+
+    - name: Ejecutar comando SHOW INTERFACES STATUS (para VLAN / estado)
+      cisco.ios.ios_command:
+        commands:
+          - show interfaces status
+      register: show_int_status
+
+    - name: Extraer Modelo, Versión del IOS y Número de Serie
+      set_fact:
+        serie: "{{ (show_version_output.stdout[0] | regex_findall('System serial number\\s*:?\\s*(\\S+)') | first) | default('NO_ENCONTRADO') }}"
+        modelo: "{{ (show_version_output.stdout[0] | regex_findall('Model number\\s*:?\\s*(\\S+)') | first) | default('NO_ENCONTRADO') }}"
+        version_ios: "{{ (show_version_output.stdout[0] | regex_findall('Version\\s+([\\w\\.()]+)') | first) | default('NO_ENCONTRADO') }}"
+
+    - name: Parsear información de interfaces (solo líneas válidas)
+      set_fact:
+        interfaces_parseadas: >-
+          {{ show_int_status.stdout[0].split('\n')
+             | select('match', '^(Gi|Fa|Te|Eth|Po)')
+             | map('regex_replace', '\\s{2,}', ',')
+             | list }}
+
+    - name: Comprobar existencia del archivo CSV
+      ansible.builtin.stat:
+        path: "{{ csv_file }}"
+      delegate_to: localhost
+      register: csv_stat
+      run_once: true
+
+    - name: Agregar encabezado CSV si no existe (solo una vez)
+      ansible.builtin.lineinfile:
+        path: "{{ csv_file }}"
+        line: "Dispositivo,Serie,Modelo,Versión IOS,Interfaz,Nombre,Estado,VLAN"
+        insertbefore: BOF
+        create: yes
+      when: not csv_stat.stat.exists
+      delegate_to: localhost
+      run_once: true
+
+    - name: Agregar filas CSV (una por interfaz)
+      ansible.builtin.lineinfile:
+        path: "{{ csv_file }}"
+        line: "{{ inventory_hostname }},{{ serie }},{{ modelo }},{{ version_ios }},{{ item }}"
+        insertafter: EOF
+        create: yes
+        regexp: "^{{ (inventory_hostname ~ ',' ~ serie ~ ',' ~ modelo ~ ',' ~ version_ios ~ ',' ~ item) | regex_escape }}"
+      loop: "{{ interfaces_parseadas }}"
+      delegate_to: localhost
+
+    # --- INICIO: NUEVAS TAREAS PARA SVI (VLAN IPs) ---
+
+    - name:  Ejecutar comando SHOW IP INTERFACE BRIEF (para SVIs)
+      cisco.ios.ios_command:
+        commands:
+          - show ip interface brief
+      register: show_ip_int_brief_output
+
+    - name:  Parsear información de SVIs (solo Vlan con IP)
+      set_fact:
+        svis_parseadas: >-
+          {{ show_ip_int_brief_output.stdout[0].splitlines()
+             | select('match', '^\s*Vlan')
+             | map('regex_replace', '\s+', ' ')
+             | map('regex_replace', '^\s*(\S+)\s(\S+).*$', '\1,\2')
+             | list }}
+
+    - name:  Comprobar existencia del archivo CSV de SVIs
+      ansible.builtin.stat:
+        path: "{{ csv_svi_file }}"
+      delegate_to: localhost
+      register: csv_svi_stat
+      run_once: true
+
+    - name:  Agregar encabezado CSV de SVIs si no existe (solo una vez)
+      ansible.builtin.lineinfile:
+        path: "{{ csv_svi_file }}"
+        line: "Dispositivo,Interfaz_SVI,IP_Address"
+        insertbefore: BOF
+        create: yes
+      when: not csv_svi_stat.stat.exists
+      delegate_to: localhost
+      run_once: true
+
+    - name:  Agregar filas CSV de SVIs (una por SVI)
+      ansible.builtin.lineinfile:
+        path: "{{ csv_svi_file }}"
+        line: "{{ inventory_hostname }},{{ item }}"
+        insertafter: EOF
+        create: yes
+        regexp: "^{{ (inventory_hostname ~ ',' ~ item) | regex_escape }}"
+      loop: "{{ svis_parseadas }}"
+      delegate_to: localhost
+
+    # --- FIN: NUEVAS TAREAS PARA SVI ---
+
+    - name: Mostrar resumen por host
+      ansible.builtin.debug:
+        msg: "Información de {{ inventory_hostname }} procesada: {{ interfaces_parseadas | length }} interfaces agregadas. {{ svis_parseadas | length }} SVIs agregadas."
